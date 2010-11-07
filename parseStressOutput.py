@@ -45,17 +45,19 @@ def parseStressOutput(opts,args):
 	lookingForSTART = 0
 	parseCALLSTACK = 1
 
-	# Optional parameters for debug output
+	# START - Optional parameters for debug output
 	debug = 0
 	numEntriesToOutput = 5
+	# END - Optional parameters for debug output
 
 	# Internal variables with initial values
 	state = lookingForRUN
 	callstackState = lookingForSTART
 
 	crashDetails = dict()
-
 	crashUniqueDetails = dict()
+	callstackLines = dict()
+	callstackLineCounts = dict()
 
 	logFileName = args[0]
 	if os.path.isfile(logFileName) == False:
@@ -127,7 +129,16 @@ def parseStressOutput(opts,args):
 				crashTag = currentCrashDetails[0]
 				callstackHash = hashlib.md5()
 				for i in range(1,len(currentCrashDetails)):
-					callstackHash.update(currentCrashDetails[i])
+					callstackLine = currentCrashDetails[i]
+					# Add a hash for each line in the callstack
+					callstackLineHash = hashlib.md5()
+					callstackLineHash.update(callstackLine)
+					callstackLineHexHash = callstackLineHash.hexdigest()
+					callstackLineCounts.setdefault(callstackLineHexHash, []).append(crashTag)
+					callstackLines[callstackLineHexHash] = callstackLine
+
+					# Make a combined hash from the total callstack
+					callstackHash.update(callstackLine)
 
 				currentUniqueHash = callstackHash.hexdigest()
 
@@ -164,16 +175,17 @@ def parseStressOutput(opts,args):
 		for crashDetail in crashList:
 			numCrashes += 1
 
+	# Sort the unique crashes to put the most common at the top
 	# Make a list of the hashes with counts so we can sort them
 	uniqueCrashCounts = list()
 	for crashHash, crashList in crashDetails.items():
 		numCrashesForHash = len(crashList)
 		uniqueCrashCounts.append( (crashHash,numCrashesForHash) )
 
-	# Sort the unique crashes to put the most common at the top
 	# Quick bubble sort 
-	for i in range(numUniqueCrashes):
-		for j in range(i+1,numUniqueCrashes):
+	numUniqueCounts = len(uniqueCrashCounts)
+	for i in range(numUniqueCounts):
+		for j in range(i+1,numUniqueCounts):
 			numCrashI = uniqueCrashCounts[i][1]
 			numCrashJ = uniqueCrashCounts[j][1]
 			if numCrashJ > numCrashI:
@@ -182,18 +194,48 @@ def parseStressOutput(opts,args):
 				uniqueCrashCounts[j] = uniqueCrashCounts[i]
 				uniqueCrashCounts[i] = tempCrashCount
 
-	print "NumUniqueCrashes = " + str(numUniqueCrashes)
-	for i in range(numUniqueCrashes):
+	# Sort the callstackCounts by the number of counts to put most common at the top
+	# Make a list of the hashes with counts so we can sort them
+	uniqueCallstackLineCounts = list()
+	for callstackLineHash, crashList in callstackLineCounts.items():
+		numCrashesForHash = len(crashList)
+		uniqueCallstackLineCounts.append( (callstackLineHash,numCrashesForHash) )
+
+	# Quick bubble sort 
+	numUniqueCallstackLineCounts = len(uniqueCallstackLineCounts)
+	for i in range(numUniqueCallstackLineCounts):
+		for j in range(i+1,numUniqueCallstackLineCounts):
+			numCrashI = uniqueCallstackLineCounts[i][1]
+			numCrashJ = uniqueCallstackLineCounts[j][1]
+			if numCrashJ > numCrashI:
+				# Swap element
+				tempCrashCount = uniqueCallstackLineCounts[j]
+				uniqueCallstackLineCounts[j] = uniqueCallstackLineCounts[i]
+				uniqueCallstackLineCounts[i] = tempCrashCount
+
+	print "NumUniqueCounts = " + str(numUniqueCounts)
+	for i in range(numUniqueCounts):
 		crashHash = uniqueCrashCounts[i][0]
 		crashDetail = crashUniqueDetails[crashHash]
-		print "################ START UNIQUE CRASH: " + crashHash + " NumTimes:" + str(len(crashDetail))
-		for crashTag in crashDetail:
-			print "Level/Playlist: " + crashTag
+		print
+		print "UNIQUE CRASH: " + crashHash + " NumTimes:" + str(len(crashDetail))
+		for detail in crashDetail:
+			print "Level/Playlist: " + detail
 		print "#### CallStack ####"
 		currentCrashDetails = crashDetails[crashHash][0]
 		for i in range(1,len(currentCrashDetails)):
 			print currentCrashDetails[i]
-		print "################ END UNIQUE CRASH ################"
+
+	print
+	print "NumUniqueCallstackLineCounts = " + str(numUniqueCallstackLineCounts)
+	for i in range(numUniqueCallstackLineCounts):
+		callstackLineHash = uniqueCallstackLineCounts[i][0]
+		callstackLine = callstackLines[callstackLineHash]
+		callstackDetail = callstackLineCounts[callstackLineHash]
+		print
+		print callstackLine + " NumTimes:" + str(len(callstackDetail))
+		for detail in callstackDetail:
+			print "Level/Playlist: " + detail
 
 	if debug > 0:
 		print "NumCrashes = " + str(numCrashes)
@@ -211,6 +253,7 @@ def parseStressOutput(opts,args):
 						break
 				print "################ END CRASH ################"
 	
+	print
 	print "NumUniqueCrashes:" + str(numUniqueCrashes) + " NumCrashes:" + str(numCrashes)
 
 
