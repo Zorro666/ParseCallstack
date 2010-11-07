@@ -47,7 +47,6 @@ def parseStressOutput(opts,args):
 
 	# Optional parameters for debug output
 	debug = 0
-	debug = 1
 	numEntriesToOutput = 5
 
 	# Internal variables with initial values
