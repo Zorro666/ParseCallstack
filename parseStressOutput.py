@@ -3,15 +3,6 @@ import os
 import getopt
 import hashlib
 
-# Callstack example inside a big log file
-# 04/11/2010 13:10:21.11 Perf_cw2_church_04_11_2010__12_56:RUN 
-# 04/11/2010 13:10:21.11 Perf_cw2_church_04_11_2010__12_56:CRASH 
-# 04/11/2010  9:35:54.31 Play_MP_Reveal_04_11_2010__08_35:END
-
-#logFileName = "home/jake/Documents/main_pc.log"
-#logFileName = "home/jake/Documents/main_360.log"
-#logFileName = "home/jake/Documents/main_ps3.log"
-
 class Usage(Exception):
 	def __init__(self, msg):
 		self.msg = msg
@@ -56,16 +47,16 @@ def parseStressOutput(opts,args):
 
 	# Optional parameters for debug output
 	debug = 0
+	debug = 1
 	numEntriesToOutput = 5
 
 	# Internal variables with initial values
 	state = lookingForRUN
 	callstackState = lookingForSTART
 
-	crashDetails = list()
-	crashHashes = list()
-	crashUniqueHashes = list()
-	crashUniqueCrashes = list()
+	crashDetails = dict()
+
+	crashUniqueDetails = dict()
 
 	logFileName = args[0]
 	if os.path.isfile(logFileName) == False:
@@ -99,7 +90,20 @@ def parseStressOutput(opts,args):
 				callstackState = lookingForSTART
 				# Found a crash mark it
 				currentCrashDetails = list()
-				crashTag = line
+				# Parse the crashtag into the level/playlist tag for it 
+				# e.g. 04/11/2010 13:10:21.11 Perf_cw2_rooftop_gardens_04_11_2010__12_56:CRASH -> cw2_rooftop_gardens
+				# e.g. 04/11/2010  9:46:15.71 Play_MP_Reveal_04_11_2010__08_44:CRASH -> MP_Reveal
+				# <blah>_<level/playlist>_<number>
+				crashTagTokens = line.split("_")
+				crashTags = list()
+				for i in range(1,len(crashTagTokens)):
+					token = crashTagTokens[i]
+					if unicode(token).isnumeric() == False:
+							crashTags.append(token)
+							continue
+					break;
+				crashTag = "_".join(crashTags)
+					
 				currentCrashDetails.append(crashTag)
 				continue
 
@@ -121,29 +125,15 @@ def parseStressOutput(opts,args):
 					print ""
 
 				# Make a total hash of the callstack for pure equivalence testing
-				rawCallstack = currentCrashDetails
-				crashTag = rawCallstack[0]
-				rawCallstack.pop(0)
+				crashTag = currentCrashDetails[0]
 				callstackHash = hashlib.md5()
-				for entry in currentCrashDetails:
-					callstackHash.update(entry)
+				for i in range(1,len(currentCrashDetails)):
+					callstackHash.update(currentCrashDetails[i])
 
 				currentUniqueHash = callstackHash.hexdigest()
 
-				crashDetails.append(currentCrashDetails)
-				crashHashes.append(currentUniqueHash)
-
-				if currentUniqueHash in crashUniqueHashes:
-					# This crash has already happened append the crash info to the crashUniqueCrashes list
-					foundIndex = crashUniqueHashes.index(currentUniqueHash)
-					crashUniqueCrashes[foundIndex].append(crashTag)
-				else:
-					# A new crash
-					crashUniqueHashes.append(currentUniqueHash)
-					crashTags = list()
-					crashTags.append(crashTag)
-					crashUniqueCrashes.append(crashTags)
-
+				crashDetails.setdefault(currentUniqueHash, []).append(currentCrashDetails)
+				crashUniqueDetails.setdefault(currentUniqueHash, []).append(crashTag)
 				continue
 
 			if callstackState == lookingForSTART:
@@ -169,40 +159,60 @@ def parseStressOutput(opts,args):
 				callstackLine = callstackLine.strip()
 				currentCrashDetails.append(callstackLine)
 
-	print "NumCrashDetails = " + str(len(crashDetails))
-	print "NumCrashUniqueHashes = " + str(len(crashUniqueHashes))
-	for currentCrash, crash in enumerate(crashDetails):
-		currentCrashDetails = crash
-		if len(currentCrashDetails) > 0:
-			crashTag = currentCrashDetails[0]
-			print "################ START CRASH: " + crashHashes[currentCrash]
-			print crashTag
-			currentCrashDetails.pop(0)
-			for index,entry in enumerate(currentCrashDetails):
-				print entry
-				if index > numEntriesToOutput:
-					break
-			print "################ END CRASH ################"
-			currentCrash += 1
-	
-	print "NumUniqueCrashes = " + str(len(crashUniqueCrashes))
-	for currentCrash, uniqueCrashTags in enumerate(crashUniqueCrashes):
-		crashUniqueHash = crashUniqueHashes[currentCrash]
-		print "################ START UNIQUE CRASH: " + crashUniqueHash
-		for crashTag in uniqueCrashTags:
-			print crashTag
-		crashIndex = crashHashes.index(crashUniqueHash)
-		currentCrashDetails = crashDetails[crashIndex]
-		currentCrashDetails.pop(0)
-		for index,entry in enumerate(currentCrashDetails):
-			print entry
-			if index > numEntriesToOutput:
-				break
+	numUniqueCrashes = len(crashUniqueDetails)
+	numCrashes = 0
+	for crashHash, crashList in crashDetails.items():
+		for crashDetail in crashList:
+			numCrashes += 1
+
+	# Make a list of the hashes with counts so we can sort them
+	uniqueCrashCounts = list()
+	for crashHash, crashList in crashDetails.items():
+		numCrashesForHash = len(crashList)
+		uniqueCrashCounts.append( (crashHash,numCrashesForHash) )
+
+	# Sort the unique crashes to put the most common at the top
+	# Quick bubble sort 
+	for i in range(numUniqueCrashes):
+		for j in range(i+1,numUniqueCrashes):
+			numCrashI = uniqueCrashCounts[i][1]
+			numCrashJ = uniqueCrashCounts[j][1]
+			if numCrashJ > numCrashI:
+				# Swap element
+				tempCrashCount = uniqueCrashCounts[j]
+				uniqueCrashCounts[j] = uniqueCrashCounts[i]
+				uniqueCrashCounts[i] = tempCrashCount
+
+	print "NumUniqueCrashes = " + str(numUniqueCrashes)
+	for i in range(numUniqueCrashes):
+		crashHash = uniqueCrashCounts[i][0]
+		crashDetail = crashUniqueDetails[crashHash]
+		print "################ START UNIQUE CRASH: " + crashHash + " NumTimes:" + str(len(crashDetail))
+		for crashTag in crashDetail:
+			print "Level/Playlist: " + crashTag
+		print "#### CallStack ####"
+		currentCrashDetails = crashDetails[crashHash][0]
+		for i in range(1,len(currentCrashDetails)):
+			print currentCrashDetails[i]
 		print "################ END UNIQUE CRASH ################"
 
-	print "NumCrashDetails = " + str(len(crashDetails))
-	print "NumCrashUniqueHashes = " + str(len(crashUniqueHashes))
-	print "NumUniqueCrashes = " + str(len(crashUniqueCrashes))
+	if debug > 0:
+		print "NumCrashes = " + str(numCrashes)
+		for crashHash, crashList in crashDetails.items():
+			for crashDetail in crashList:
+				currentCrashDetails = crashDetail
+				lenCurrentCrashDetails = len(currentCrashDetails);
+				if lenCurrentCrashDetails > 0:
+					crashTag = currentCrashDetails[0]
+				print "################ START CRASH: " + crashHash
+				print crashTag
+				for i in range(1,lenCurrentCrashDetails):
+					print currentCrashDetails[i]
+					if i >= numEntriesToOutput:
+						break
+				print "################ END CRASH ################"
+	
+	print "NumUniqueCrashes:" + str(numUniqueCrashes) + " NumCrashes:" + str(numCrashes)
 
 
 #########################################################
